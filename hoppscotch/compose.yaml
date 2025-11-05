@@ -1,0 +1,114 @@
+# Hoppscotch Community Edition - Docker Compose File (Self-Contained)
+#
+# This file sets up the entire Hoppscotch stack with all environment
+# variables defined directly within this file. It relies on the default,
+# stable initialization logic of the official Postgres image.
+#
+# INSTRUCTIONS:
+# 1. Save this file as `compose.yaml`.
+# 3. Run `docker compose down -v` to remove any old data and containers.
+# 4. Run `docker compose up --build -d`.
+
+############################
+# Networks and Volumes
+############################
+networks:
+  hoppscotch-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SUBNET_CIDR}
+
+volumes:
+  postgres_data:
+    driver: local
+
+############################
+# Services
+############################
+services:
+
+  #################################################
+  # 1. Postgres Database Service
+  #################################################
+  postgres:
+    image: postgres:17
+    container_name: hoppscotch-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # These four variables should be defined in .env
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PORT=5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "PGPASSWORD=${POSTGRES_PASSWORD} psql -h 127.0.0.1 -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c 'SELECT 1'"]
+      interval: 2s
+      timeout: 1s
+      retries: 5
+    networks:
+      hoppscotch-net:
+        ipv4_address: ${POSTGRES_DB_IP}
+    ## Chinese remainder: ensure database is ready before migrations :contentReference[oaicite:2]{index=2}
+
+  #################################################
+  # 2. Database Migration Service
+  #################################################
+  hoppscotch-migrator:
+    image: hoppscotch/hoppscotch-backend:latest
+    container_name: hoppscotch-migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    entrypoint: >
+      sh -c "pnpm dlx prisma migrate deploy"
+    networks:
+      hoppscotch-net:
+        ipv4_address: ${HOPPSCOTCH_MIGRATOR_IP}
+    restart: "no"
+    ## This will run migrations once and then stop. Ensure .env has DATABASE_URL pointing to "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" :contentReference[oaicite:3]{index=3}
+  
+  #################################################
+  # 3. HoppScotch Service
+  #################################################
+  hoppscotch:
+    image: hoppscotch/hoppscotch:latest
+    container_name: hoppscotch-main
+    depends_on:
+      hoppscotch-migrator:
+       condition: service_completed_successfully
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      hoppscotch-net:
+        ipv4_address: ${HOPPSCOTCH_MAIN_IP}
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl --fail http://localhost:3170/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  #################################################
+  # 4. Nginx Service
+  #################################################
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx-server
+    restart: unless-stopped
+    depends_on:
+      - hoppscotch
+    volumes:
+      - ./ngnix/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    networks:
+      hoppscotch-net:
+        ipv4_address: ${HOPPSCOTCH_NGINX_IP}
+
