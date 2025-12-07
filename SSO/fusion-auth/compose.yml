@@ -1,0 +1,99 @@
+
+services:
+  # ----------------------------------------------------
+  # 1. PostgreSQL Database Service
+  # ----------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: fusionauth-db
+    restart: unless-stopped
+    environment:
+      # Use variables from the .env file
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - fusionauth-net
+
+  # ----------------------------------------------------
+  # 2. OpenSearch (Elasticsearch Alternative)
+  # Used by FusionAuth for search and reporting functions.
+  # ----------------------------------------------------
+  search:
+    image: opensearchproject/opensearch:2.14.0
+    container_name: fusionauth-search
+    restart: unless-stopped
+    environment:
+      # Disables security features for easier local development
+      OPENSEARCH_SECURITY_DISABLED: "true"
+      # Run as a single-node cluster to pass bootstrap checks in Docker
+      discovery.type: single-node
+      # Required to prevent memory-related errors
+      "OPENSEARCH_JAVA_OPTS": "-Xms512m -Xmx512m" 
+      # Disable security settings (optional, but simplifies local setup)
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - search_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "-u", "admin:admin", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fusionauth-net
+
+  # ----------------------------------------------------
+  # 3. FusionAuth Application Service
+  # ----------------------------------------------------
+  fusionauth:
+    image: fusionauth/fusionauth-app:latest
+    container_name: fusionauth-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+    environment:
+      # Database Connections
+      DATABASE_URL: jdbc:postgresql://db:5432/fusionauth
+      DATABASE_ROOT_USERNAME: ${POSTGRES_USER}
+      DATABASE_ROOT_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_USERNAME: ${DATABASE_USERNAME}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      
+      # Search Connection
+      SEARCH_SERVERS: http://search:9200
+      SEARCH_TYPE: elasticsearch
+      
+      # General Configuration
+      FUSIONAUTH_APP_RUNTIME_MODE: development
+      FUSIONAUTH_APP_URL: http://fusionauth:9011
+      FUSIONAUTH_APP_MEMORY: 512M
+    ports:
+      - "9011:9011" # Main FusionAuth Admin and API port
+    volumes:
+      - fusionauth_config:/usr/local/fusionauth/config
+    networks:
+      - fusionauth-net
+
+volumes:
+  db_data:
+  search_data:
+  fusionauth_config:
+
+networks:
+  fusionauth-net:
+    driver: bridge
