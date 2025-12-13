@@ -1,0 +1,54 @@
+version: "3"
+
+networks:
+  # Isolated Secret Network
+  # "The Vault Network"
+  secret-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.123.45.0/24
+          gateway: 10.123.45.1
+
+services:
+  infisical-db:
+    image: postgres:14-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: infisical
+      POSTGRES_USER: infisical
+      POSTGRES_PASSWORD: password123 # Change in production, but internal to this net
+    networks:
+      - secret-net
+    volumes:
+      - infisical_db_data:/var/lib/postgresql/data
+
+  infisical-redis:
+    image: redis:7-alpine
+    restart: always
+    networks:
+      - secret-net
+
+  infisical-core:
+    image: infisical/infisical:latest
+    restart: always
+    networks:
+      secret-net:
+        ipv4_address: 10.123.45.10
+    ports:
+      - "8082:8080" # Exposed to host for Admin Setup
+    depends_on:
+      - infisical-db
+      - infisical-redis
+    environment:
+      - NODE_ENV=production
+      - DB_CONNECTION_URI=postgres://infisical:password123@infisical-db:5432/infisical
+      - REDIS_URL=redis://infisical-redis:6379
+      - AUTH_SECRET=some_random_secret_string_min_32_chars_long_12345
+      - ENCRYPTION_KEY=12345678901234567890123456789012 # 32 chars hex
+      - LOGIN_TTL_SECONDS=7200
+      - TELEMETRY_ENABLED=false
+      # Allowlisting logic will happen inside the app configuration via UI
+    
+volumes:
+  infisical_db_data:
