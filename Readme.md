@@ -4,6 +4,7 @@ This repository contains a multi-service Docker application designed to provide 
 
 *   **Hoppscotch:** An open-source API development and testing tool.
 *   **n8n:** A powerful workflow automation tool.
+*   **Infisical:** A secrets management and environment synchronization tool.
 
 Both applications are orchestrated using Docker Compose, allowing for easy setup and management.
 
@@ -49,6 +50,11 @@ Once both Hoppscotch and n8n are configured, you can start their respective serv
     ```
 *   **For n8n:** From within the `n8n/` directory, run:
     ```bash
+    docker compose up --build -d
+    ```
+*   **For Infisical:** From within the `infisical/` directory, run:
+    ```bash
+    cd infisical/
     docker compose up --build -d
     ```
 
